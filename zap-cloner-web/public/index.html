@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zap Cloner</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#16181d; --muted:#6b7280; --line:#e2e5ea; --accent:#16a34a; --danger:#dc2626; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0e1012; --card:#171a1e; --text:#f1f3f5; --muted:#9aa3ad; --line:#2a2f36; --accent:#22c55e; --danger:#f87171; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:760px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:8px 0 16px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .status { display:inline-block; padding:4px 10px; border-radius:99px; font-size:13px; border:1px solid var(--line); }
+  .status.ok { color:var(--accent); border-color:var(--accent); }
+  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 4px; }
+  input[type=text], input[type=password], input[type=number], select { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:14px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:560px) { .row { grid-template-columns:1fr; } }
+  button { padding:9px 14px; border-radius:8px; border:0; background:var(--accent); color:#fff; font-size:14px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button.danger { background:transparent; color:var(--danger); border:1px solid var(--danger); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+  #qr { display:none; text-align:center; }
+  #qr img { background:#fff; padding:8px; border-radius:8px; }
+  .check { display:flex; gap:8px; align-items:center; margin-top:14px; font-size:14px; }
+  .log { font-size:13px; border-top:1px solid var(--line); padding:6px 0; }
+  .log time { color:var(--muted); margin-right:8px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Zap Cloner</h1>
+
+  <div class="card">
+    <h2>WhatsApp</h2>
+    <span id="status" class="status">carregando...</span>
+    <div id="qr">
+      <p>Abra o WhatsApp no celular do número do bot: Aparelhos conectados &gt; Conectar um aparelho.</p>
+      <img id="qrimg" alt="QR Code" width="280" height="280">
+    </div>
+    <div class="actions">
+      <button class="ghost" id="refresh">Atualizar grupos</button>
+      <button class="danger" id="logout">Desconectar número</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Grupos</h2>
+    <label for="sourceGroup">Grupo de origem (que será clonado)</label>
+    <select id="sourceGroup"></select>
+    <label for="targetGroup">Seu grupo (onde as ofertas serão postadas)</label>
+    <select id="targetGroup"></select>
+    <div class="hint">O número do bot precisa estar nos dois grupos.</div>
+  </div>
+
+  <div class="card">
+    <h2>Afiliados</h2>
+    <div class="row">
+      <div><label for="shopeeAppId">Shopee App ID</label><input type="text" id="shopeeAppId" autocomplete="off"></div>
+      <div><label for="shopeeSecret">Shopee Secret</label><input type="password" id="shopeeSecret" autocomplete="off"></div>
+    </div>
+    <label for="shopeeSubId">Shopee Sub ID (para rastrear vendas)</label>
+    <input type="text" id="shopeeSubId">
+    <label for="mlParams">Mercado Livre: parâmetros do seu link de afiliado</label>
+    <input type="text" id="mlParams" placeholder="matt_tool=SEU_ID&amp;matt_word=SEU_CODIGO">
+    <div class="hint">Copie um link seu do painel do ML Afiliados e cole aqui o que vem depois do "?".</div>
+    <div class="check"><input type="checkbox" id="allowOtherLinks"><label for="allowOtherLinks" style="margin:0">Postar também mensagens com links de outras lojas (sem trocar o afiliado)</label></div>
+    <div class="row">
+      <div><label for="minDelay">Espera mínima antes de postar (s)</label><input type="number" id="minDelay" min="0"></div>
+      <div><label for="maxDelay">Espera máxima (s)</label><input type="number" id="maxDelay" min="0"></div>
+    </div>
+    <div class="actions"><button id="save">Salvar configuração</button><span id="saved" class="hint"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>Atividade recente</h2>
+    <div id="logs"></div>
+  </div>
+</main>
+
+<script>
+  var dirty = false;
+  var groupsSig = '';
+  var filled = false;
+  var $ = function (id) { return document.getElementById(id); };
+  var fields = ['sourceGroup','targetGroup','shopeeAppId','shopeeSecret','shopeeSubId','mlParams','minDelay','maxDelay'];
+
+  fields.concat(['allowOtherLinks']).forEach(function (id) {
+    $(id).addEventListener('input', function () { dirty = true; });
+    $(id).addEventListener('change', function () { dirty = true; });
+  });
+
+  function fillSelect(sel, groups, current) {
+    sel.innerHTML = '';
+    var none = document.createElement('option');
+    none.value = ''; none.textContent = '— escolha —';
+    sel.appendChild(none);
+    var found = false;
+    groups.forEach(function (g) {
+      var o = document.createElement('option');
+      o.value = g.id; o.textContent = g.name;
+      if (g.id === current) found = true;
+      sel.appendChild(o);
+    });
+    if (current && !found) {
+      var o2 = document.createElement('option');
+      o2.value = current; o2.textContent = current + ' (não listado)';
+      sel.appendChild(o2);
+    }
+    sel.value = current || '';
+  }
+
+  async function load() {
+    var s;
+    try { s = await (await fetch('/api/status')).json(); } catch (e) { return; }
+
+    var st = $('status');
+    st.textContent = s.status;
+    st.className = 'status' + (s.status === 'conectado' ? ' ok' : '');
+
+    if (s.qr) { $('qr').style.display = 'block'; $('qrimg').src = s.qr; }
+    else { $('qr').style.display = 'none'; }
+
+    var sig = JSON.stringify(s.groups);
+    if (sig !== groupsSig || !filled) {
+      var curSrc = dirty ? $('sourceGroup').value : s.config.sourceGroup;
+      var curTgt = dirty ? $('targetGroup').value : s.config.targetGroup;
+      fillSelect($('sourceGroup'), s.groups, curSrc);
+      fillSelect($('targetGroup'), s.groups, curTgt);
+      groupsSig = sig;
+    }
+
+    if (!dirty) {
+      ['shopeeAppId','shopeeSecret','shopeeSubId','mlParams','minDelay','maxDelay'].forEach(function (id) {
+        $(id).value = s.config[id];
+      });
+      $('allowOtherLinks').checked = !!s.config.allowOtherLinks;
+      $('sourceGroup').value = s.config.sourceGroup;
+      $('targetGroup').value = s.config.targetGroup;
+      filled = true;
+    }
+
+    var box = $('logs');
+    box.innerHTML = '';
+    s.logs.slice(0, 30).forEach(function (l) {
+      var d = document.createElement('div');
+      d.className = 'log';
+      var t = document.createElement('time');
+      t.textContent = new Date(l.t).toLocaleTimeString('pt-BR');
+      d.appendChild(t);
+      d.appendChild(document.createTextNode(l.msg));
+      box.appendChild(d);
+    });
+  }
+
+  $('save').addEventListener('click', async function () {
+    var body = {
+      allowOtherLinks: $('allowOtherLinks').checked
+    };
+    fields.forEach(function (id) { body[id] = $(id).value; });
+    await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    dirty = false;
+    $('saved').textContent = 'Salvo!';
+    setTimeout(function () { $('saved').textContent = ''; }, 2500);
+    load();
+  });
+
+  $('refresh').addEventListener('click', async function () {
+    await fetch('/api/refresh-groups', { method: 'POST' });
+    groupsSig = '';
+    load();
+  });
+
+  $('logout').addEventListener('click', async function () {
+    if (!confirm('Desconectar o número do WhatsApp? Será preciso escanear o QR Code de novo.')) return;
+    await fetch('/api/logout', { method: 'POST' });
+  });
+
+  load();
+  setInterval(load, 3000);
+</script>
+</body>
+</html>

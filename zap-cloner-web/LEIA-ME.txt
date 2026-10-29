@@ -1,0 +1,29 @@
+ZAP CLONER WEB
+
+O bot roda num servidor 24h e voce controla tudo por uma pagina web:
+escanear o QR Code, escolher os grupos, colocar os afiliados e ver o que foi enviado.
+
+VARIAVEIS DE AMBIENTE
+  PANEL_PASSWORD  (obrigatoria) senha para entrar no painel (usuario: qualquer um)
+  PORT            (opcional) o provedor normalmente define sozinho
+  DATA_DIR        (opcional) pasta onde ficam a sessao do WhatsApp e a config. Padrao no Docker: /data
+
+REGRAS IMPORTANTES DA HOSPEDAGEM
+  1. Precisa ficar ligado o tempo todo (planos gratuitos que "dormem" derrubam o bot).
+  2. Precisa de um disco/volume persistente montado em /data. Sem isso, a sessao do
+     WhatsApp some a cada reinicio e voce tem que escanear o QR de novo.
+  3. Rode apenas UMA copia do bot (duas copias com o mesmo numero brigam entre si).
+  4. Use HTTPS (Railway, Render e similares ja dao) porque a senha trafega no login.
+
+DEPLOY COM DOCKER (VPS)
+  docker build -t zap-cloner .
+  docker run -d --restart always -p 3000:3000 -v zapdata:/data -e PANEL_PASSWORD=suasenha zap-cloner
+  Depois abra http://IP-DO-SERVIDOR:3000
+
+DEPLOY NO RAILWAY OU RENDER
+  Suba esta pasta num repositorio do GitHub, crie um servico a partir do Dockerfile,
+  adicione um Volume montado em /data e a variavel PANEL_PASSWORD.
+
+USO
+  Abra o painel > escaneie o QR > escolha o grupo de origem e o seu grupo >
+  preencha Shopee e Mercado Livre > Salvar. Teste antes com um grupo so seu.
